@@ -3,18 +3,24 @@ const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const app = express();
-const PORT = 3001; // Порт, на котором будет работать наш сервер
+const PORT = 3001;
 
-// --- НАСТРОЙКА СЕРВЕРА ---
-
-// 1. Разрешаем запросы с других доменов (CORS), в частности, с React (обычно порт 3000)
+// --- ДАННЫЕ АДМИНА (в реальном проекте хранить в .env или БД с хешем пароля) ---
+const ADMIN_CREDENTIALS = {
+    username: 'admin',
+    password: '123',
+    token: 'secret-admin-token-12345' // простой токен для авторизации
+};
 app.use(cors());
-// 2. Парсер для автоматического преобразования входящих JSON-запросов
 app.use(express.json());
+const requireAdmin = (req, res, next) => {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (token !== ADMIN_CREDENTIALS.token) {
+        return res.status(401).json({ error: 'Unauthorized. Admin access required.' });
+    }
+    next();
+};
 
-// --- НАСТРОЙКА БАЗЫ ДАННЫХ SQLite ---
-
-// Подключение к базе данных. Файл menu.db будет создан автоматически.
 const db = new sqlite3.Database('./menu.db', (err) => {
     if (err) console.error('Database connection error:', err.message);
     console.log('Connected to the SQLite database. (Подключено к базе данных)');
@@ -49,7 +55,27 @@ db.serialize(() => {
 
 // --- API МАРШРУТЫ (ROUTES) ---
 
-// 1. Получить все категории
+// Авторизация админа
+app.post('/api/login', (req, res) => {
+    const { username, password } = req.body;
+    if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
+        res.json({ success: true, token: ADMIN_CREDENTIALS.token });
+    } else {
+        res.status(401).json({ success: false, error: 'Invalid credentials' });
+    }
+});
+
+// Проверка токена
+app.get('/api/verify', (req, res) => {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (token === ADMIN_CREDENTIALS.token) {
+        res.json({ valid: true });
+    } else {
+        res.status(401).json({ valid: false });
+    }
+});
+
+// 1. Получить все категории (публичный)
 app.get('/api/categories', (req, res) => {
     db.all("SELECT id, name_ru, name_en, image FROM categories ORDER BY sort_order", [], (err, rows) => {
         if (err) return res.status(500).json({error: err.message});
@@ -57,8 +83,8 @@ app.get('/api/categories', (req, res) => {
     });
 });
 
-// 2. Добавить новую категорию
-app.post('/api/categories', (req, res) => {
+// 2. Добавить новую категорию (только админ)
+app.post('/api/categories', requireAdmin, (req, res) => {
     const { nameRu, nameEn, image } = req.body;
     const sql = `INSERT INTO categories (name_ru, name_en, image, sort_order) VALUES (?, ?, ?, (SELECT IFNULL(MAX(sort_order), 0) + 1 FROM categories))`;
     db.run(sql, [nameRu, nameEn, image], function(err) {
@@ -67,15 +93,15 @@ app.post('/api/categories', (req, res) => {
     });
 });
 
-// 3. Удалить категорию
-app.delete('/api/categories/:id', (req, res) => {
+// 3. Удалить категорию (только админ)
+app.delete('/api/categories/:id', requireAdmin, (req, res) => {
     db.run(`DELETE FROM categories WHERE id = ?`, req.params.id, function(err) {
         if (err) return res.status(500).json({error: err.message});
         res.json({ message: "Deleted", changes: this.changes });
     });
 });
 
-// 4. Получить товары конкретной категории
+// 4. Получить товары конкретной категории (публичный)
 app.get('/api/items/:categoryId', (req, res) => {
     const sql = "SELECT id, category_id, name_ru, name_en, desc_ru, desc_en, price, image FROM items WHERE category_id = ?";
     db.all(sql, [req.params.categoryId], (err, rows) => {
@@ -84,8 +110,8 @@ app.get('/api/items/:categoryId', (req, res) => {
     });
 });
 
-// 5. Добавить новый товар
-app.post('/api/items', (req, res) => {
+// 5. Добавить новый товар (только админ)
+app.post('/api/items', requireAdmin, (req, res) => {
     const { categoryId, nameRu, nameEn, descRu, descEn, price, image } = req.body;
     const sql = `INSERT INTO items (category_id, name_ru, name_en, desc_ru, desc_en, price, image)
                  VALUES (?, ?, ?, ?, ?, ?, ?)`;
@@ -95,8 +121,8 @@ app.post('/api/items', (req, res) => {
     });
 });
 
-// 6. Удалить товар
-app.delete('/api/items/:id', (req, res) => {
+// 6. Удалить товар (только админ)
+app.delete('/api/items/:id', requireAdmin, (req, res) => {
     db.run(`DELETE FROM items WHERE id = ?`, req.params.id, function(err) {
         if (err) return res.status(500).json({error: err.message});
         res.json({ message: "Deleted", changes: this.changes });

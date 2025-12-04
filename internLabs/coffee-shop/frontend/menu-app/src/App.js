@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Coffee, ArrowLeft, Plus, Trash2, Settings, Globe, Loader2
+  Coffee, ArrowLeft, Plus, Trash2, Settings, Globe, Loader2, LogIn, LogOut, X
 } from 'lucide-react';
 
 const API_BASE_URL = 'http://localhost:3001/api';
@@ -42,6 +42,79 @@ const LanguageScreen = ({ setLang }) => (
   </div>
 );
 
+// Модальное окно авторизации
+const LoginModal = ({ isOpen, onClose, onLogin, t }) => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        localStorage.setItem('adminToken', data.token);
+        onLogin(data.token);
+        onClose();
+        setUsername('');
+        setPassword('');
+      } else {
+        setError(t('Неверный логин или пароль', 'Invalid username or password'));
+      }
+    } catch (err) {
+      setError(t('Ошибка соединения', 'Connection error'));
+    }
+    setLoading(false);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>{t('Вход для администратора', 'Admin Login')}</h2>
+          <Button variant="ghost" onClick={onClose} className="icon-btn">
+            <X size={20} />
+          </Button>
+        </div>
+        <form onSubmit={handleSubmit} className="login-form">
+          <Input
+            type="text"
+            placeholder={t('Логин', 'Username')}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            required
+          />
+          <Input
+            type="password"
+            placeholder={t('Пароль', 'Password')}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          {error && <div className="error-message">{error}</div>}
+          <Button type="submit" disabled={loading} style={{ width: '100%' }}>
+            {loading ? <Loader2 size={18} className="spinner" /> : <LogIn size={18} />}
+            {t('Войти', 'Login')}
+          </Button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 // --- ГЛАВНОЕ ПРИЛОЖЕНИЕ ---
 
 const App = () => {
@@ -49,11 +122,44 @@ const App = () => {
   const [view, setView] = useState('categories');
   const [activeCategory, setActiveCategory] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminToken, setAdminToken] = useState(null);
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [categories, setCategories] = useState([]);
   const [items, setItems] = useState([]);
 
   const t = useCallback((ru, en) => (lang === 'ru' ? ru : en), [lang]);
+
+  // Проверка токена при загрузке
+  useEffect(() => {
+    const token = localStorage.getItem('adminToken');
+    if (token) {
+      fetch(`${API_BASE_URL}/verify`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.valid) {
+            setAdminToken(token);
+            setIsAdmin(true);
+          } else {
+            localStorage.removeItem('adminToken');
+          }
+        })
+        .catch(() => localStorage.removeItem('adminToken'));
+    }
+  }, []);
+
+  const handleLogin = (token) => {
+    setAdminToken(token);
+    setIsAdmin(true);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('adminToken');
+    setAdminToken(null);
+    setIsAdmin(false);
+  };
 
   const fetchData = useCallback(async (endpoint) => {
     try {
@@ -62,10 +168,9 @@ const App = () => {
       return await response.json();
     } catch (error) {
       console.error('API Error:', error);
-      window.alert(t('Ошибка загрузки данных.', 'Data loading error.'));
       return [];
     }
-  }, [t]);
+  }, []);
 
   const loadCategories = useCallback(async () => {
     setIsLoading(true);
@@ -91,6 +196,11 @@ const App = () => {
 
   const handleFormSubmit = async (e) => {
     e.preventDefault();
+    if (!adminToken) {
+      window.alert(t('Необходима авторизация', 'Authorization required'));
+      return;
+    }
+
     setIsLoading(true);
     const formData = new FormData(e.target);
     const isCategory = view === 'categories';
@@ -110,11 +220,21 @@ const App = () => {
     };
 
     try {
-      await fetch(`${API_BASE_URL}/${isCategory ? 'categories' : 'items'}`, {
+      const response = await fetch(`${API_BASE_URL}/${isCategory ? 'categories' : 'items'}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminToken}`
+        },
         body: JSON.stringify(data),
       });
+
+      if (response.status === 401) {
+        handleLogout();
+        window.alert(t('Сессия истекла. Войдите снова.', 'Session expired. Please login again.'));
+        return;
+      }
+
       isCategory ? loadCategories() : loadItems(activeCategory.id);
     } catch (error) {
       window.alert(t('Ошибка сохранения.', 'Save error.'));
@@ -123,10 +243,25 @@ const App = () => {
   };
 
   const handleDelete = async (type, id) => {
+    if (!adminToken) {
+      window.alert(t('Необходима авторизация', 'Authorization required'));
+      return;
+    }
     if (!window.confirm(t('Удалить?', 'Delete?'))) return;
+
     setIsLoading(true);
     try {
-      await fetch(`${API_BASE_URL}/${type}/${id}`, { method: 'DELETE' });
+      const response = await fetch(`${API_BASE_URL}/${type}/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${adminToken}` }
+      });
+
+      if (response.status === 401) {
+        handleLogout();
+        window.alert(t('Сессия истекла. Войдите снова.', 'Session expired. Please login again.'));
+        return;
+      }
+
       type === 'categories' ? loadCategories() : loadItems(activeCategory.id);
     } catch (error) {
       window.alert(t('Ошибка удаления.', 'Delete error.'));
@@ -137,6 +272,14 @@ const App = () => {
 
   return (
     <div>
+      {/* МОДАЛЬНОЕ ОКНО ВХОДА */}
+      <LoginModal
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        onLogin={handleLogin}
+        t={t}
+      />
+
       {/* HEADER */}
       <header className="header">
         <div className="header-left">
@@ -154,9 +297,20 @@ const App = () => {
           <Button variant="ghost" onClick={() => setLang(lang === 'ru' ? 'en' : 'ru')} className="icon-btn">
             <Globe size={20} />
           </Button>
-          <Button variant="ghost" onClick={() => setIsAdmin(!isAdmin)} className={`icon-btn ${isAdmin ? 'active' : ''}`}>
-            <Settings size={20} />
-          </Button>
+          {isAdmin ? (
+            <>
+              <Button variant="ghost" className="icon-btn active" title={t('Админ режим', 'Admin mode')}>
+                <Settings size={20} />
+              </Button>
+              <Button variant="ghost" onClick={handleLogout} className="icon-btn" title={t('Выйти', 'Logout')}>
+                <LogOut size={20} />
+              </Button>
+            </>
+          ) : (
+            <Button variant="ghost" onClick={() => setShowLoginModal(true)} className="icon-btn" title={t('Войти как админ', 'Login as admin')}>
+              <LogIn size={20} />
+            </Button>
+          )}
         </div>
       </header>
 
@@ -244,4 +398,3 @@ const App = () => {
 };
 
 export default App;
-
