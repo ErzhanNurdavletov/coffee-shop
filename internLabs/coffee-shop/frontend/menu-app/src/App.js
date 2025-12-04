@@ -5,8 +5,6 @@ import {
 
 const API_BASE_URL = 'http://localhost:3001/api';
 
-// --- ВСПОМОГАТЕЛЬНЫЕ КОМПОНЕНТЫ ---
-
 const Button = ({ children, onClick, variant = 'primary', className = '', type = 'button', disabled = false }) => {
   const variantClass = {
     primary: 'btn-primary',
@@ -130,7 +128,6 @@ const App = () => {
 
   const t = useCallback((ru, en) => (lang === 'ru' ? ru : en), [lang]);
 
-  // Проверка токена при загрузке
   useEffect(() => {
     const token = localStorage.getItem('adminToken');
     if (token) {
@@ -191,7 +188,9 @@ const App = () => {
   }, [lang, loadCategories]);
 
   useEffect(() => {
-    if (activeCategory) loadItems(activeCategory.id);
+    if (activeCategory) {
+      loadItems(activeCategory.id);
+    }
   }, [activeCategory, loadItems]);
 
   const handleFormSubmit = async (e) => {
@@ -347,8 +346,13 @@ const App = () => {
         {/* КАТЕГОРИИ */}
         {view === 'categories' && (
           <div className="categories-grid">
-            {categories.map(cat => (
-              <div key={cat.id} className="category-card" onClick={() => { setActiveCategory(cat); setView('items'); }}>
+            {categories.map((cat, index) => (
+              <div
+                key={cat.id}
+                className="category-card animate-in"
+                style={{ animationDelay: `${index * 0.1}s` }}
+                onClick={() => { setActiveCategory(cat); setView('items'); }}
+              >
                 <img src={cat.image} alt={t(cat.name_ru, cat.name_en)} onError={(e) => e.target.src = 'https://placehold.co/400x160/e7e5e4/999?text=Image'} />
                 <div className="category-overlay">
                   <span className="category-name">{t(cat.name_ru, cat.name_en)}</span>
@@ -363,16 +367,24 @@ const App = () => {
           </div>
         )}
 
-        {/* ТОВАРЫ */}
+        {/* ТОВАРЫ - ПРОСТОЙ СПИСОК С АНИМАЦИЕЙ */}
         {view === 'items' && (
           <div className="items-list">
             {items.length === 0 && !isLoading && (
               <div className="empty-message">{t('В этой категории пока пусто', 'Empty category')}</div>
             )}
-            {items.map(item => (
-              <div key={item.id} className="item-card">
+            {items.map((item, index) => (
+              <div
+                key={item.id}
+                className="item-card animate-in"
+                style={{ animationDelay: `${index * 0.1}s` }}
+              >
                 <div className="item-image">
-                  <img src={item.image} alt={t(item.name_ru, item.name_en)} onError={(e) => e.target.src = 'https://placehold.co/150x150/f5f5f4/999?text=Image'} />
+                  <img
+                    src={item.image}
+                    alt={t(item.name_ru, item.name_en)}
+                    onError={(e) => e.target.src = 'https://placehold.co/150x150/f5f5f4/999?text=Image'}
+                  />
                 </div>
                 <div className="item-content">
                   <div>
